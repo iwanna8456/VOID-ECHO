@@ -110,14 +110,9 @@ function drawChar(x, y, dir, wt, tint, isFake = false) {
         // Логика для кода НИКТО
     if (!isFake && !isClone && player.isNikto) {
         pCol = "pink"; // Персонаж становится розовым
-        ctx.save();
-        ctx.scale(1/cameraZoom, 1/cameraZoom);
-        ctx.font = "bold 16px 'Courier New'";
-        ctx.textAlign = "center";
+        ctx.save();ctx.scale(1/cameraZoom, 1/cameraZoom);ctx.font = "bold 16px 'Courier New'";ctx.textAlign = "center";
         ctx.shadowBlur = 5; ctx.shadowColor = "white";
-        ctx.fillStyle = `hsl(${rainbowHue}, 100%, 50%)`; // Радужная надпись
-        ctx.fillText("НИКТОШЕНЬКАА)))", 0, -player.h * cameraZoom - 35);
-        ctx.restore();
+        ctx.fillStyle = `hsl(${rainbowHue}, 100%, 50%)`; // Радужная надписьctx.fillText("НИКТОШЕНЬКАА)))", 0, -player.h * cameraZoom - 35);ctx.restore();
     }
 
     if (!isFake && isAdmin) {
@@ -252,5 +247,6 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
 
 
