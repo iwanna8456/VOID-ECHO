@@ -39,7 +39,7 @@
     <div id="side-panel"><h3>COMMAND INPUT</h3><input type="text" id="side-input" placeholder="Type here..."></div>
     <div id="device-menu"><h1>SELECT DEVICE</h1><button class="btn" onclick="selectDevice('pc')">PC</button><button class="btn" onclick="selectDevice('mobile')">MOBILE</button></div>
     <div id="menu" style="display:none"><canvas id="menu-canvas"></canvas><h1>VOID ECHO</h1><input type="text" id="seed-input" placeholder="Seed..." maxlength="15"><button id="start-btn" class="btn">START</button></div>
-    <div id="mobile-controls"><div style="display:flex; gap: 25px;"><div class="joy-btn" id="m-left">←</div><div class="joy-btn" id="m-right">→</div></div><div class="joy-btn" id="m-jump">▲</div></div>
+    <div id="mobile-controls"><div style="display:flex; gap: 25px;"><div class="joy-btn" id="m-left">←</div><div class="joy-btn" id="m-clone">👤</div><div class="joy-btn" id="m-right">→</div></div><div class="joy-btn" id="m-jump">▲</div></div>
     <div id="hud"><div id="hearts"></div><div id="hotbar"><div class="slot active unlocked">🟫</div><div class="slot unlocked">🔥</div><div class="slot unlocked">💧</div><div class="slot"></div><div class="slot"></div><div class="slot unlocked" id="slot5" style="display:none">🌈</div></div></div>
     <canvas id="game"></canvas>
 
@@ -107,13 +107,26 @@ function generateRegion(startX, endX) {
 
 function drawChar(x, y, dir, wt, tint, isFake = false) {
     ctx.save(); ctx.translate(x + 11, y + 18);
+        // Логика для кода НИКТО
+    if (!isFake && !isClone && player.isNikto) {
+        pCol = "pink"; // Персонаж становится розовым
+        ctx.save();
+        ctx.scale(1/cameraZoom, 1/cameraZoom);
+        ctx.font = "bold 16px 'Courier New'";
+        ctx.textAlign = "center";
+        ctx.shadowBlur = 5; ctx.shadowColor = "white";
+        ctx.fillStyle = `hsl(${rainbowHue}, 100%, 50%)`; // Радужная надпись
+        ctx.fillText("НИКТОШЕНЬКАА)))", 0, -player.h * cameraZoom - 35);
+        ctx.restore();
+    }
+
     if (!isFake && isAdmin) {
         ctx.save(); ctx.scale(1/cameraZoom, 1/cameraZoom); ctx.font = "bold 14px 'Courier New'"; ctx.textAlign = "center";
         ctx.shadowBlur = 10; ctx.shadowColor = "#0f0"; ctx.fillStyle = "#0f0"; ctx.fillText("[Admin]", 0, -36 * cameraZoom - 15); ctx.restore();
         ctx.fillStyle = "#FF8C00"; ctx.beginPath(); ctx.moveTo(-6, -18); ctx.lineTo(-10, -30); ctx.lineTo(-2, -18); ctx.moveTo(6, -18); ctx.lineTo(10, -30); ctx.lineTo(2, -18); ctx.fill();
     }
     if (dir === -1) ctx.scale(-1, 1);
-    if (!isFake && isNoclip) ctx.globalAlpha = 0.75;
+    if (!isFake && !isClone && isAdmin) { ctx.globalAlpha = 0.75;
     let pCol = tint > 0 ? "red" : (isFake ? "rgba(255,0,0,0.6)" : getDepthColor(y + 18));
     ctx.strokeStyle = pCol; ctx.fillStyle = "black"; ctx.lineWidth = 2;
     ctx.fillRect(-11, -18, 22, 28); ctx.strokeRect(-11, -18, 22, 28);
@@ -228,7 +241,8 @@ document.getElementById('start-btn').onclick = () => {
     isGameStarted = true; generateRegion(-100, 100); player.y = 0; updateUI(); gameLoop();
 };
 
-['m-left', 'm-right', 'm-jump'].forEach(id => { const el = document.getElementById(id); el.ontouchstart = (e) => { e.preventDefault(); keys[id] = true; }; el.ontouchend = (e) => { e.preventDefault(); keys[id] = false; }; });
+['m-left','m-right','m-jump','m-clone'].forEach(id=>{const el=document.getElementById(id);if(!el)return;el.onmousedown=el.ontouchstart=(e)=>{e.preventDefault();keys[id]=true;if(id==='m-clone')spawnClone();};el.onmouseup=el.ontouchend=(e)=>{e.preventDefault();keys[id]=false;};});
+
 
 function initMenu() {
     menuCanvas.width = innerWidth; menuCanvas.height = innerHeight;
@@ -238,4 +252,5 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
 
