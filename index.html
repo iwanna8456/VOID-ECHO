@@ -141,18 +141,28 @@ function checkColl(obj, isX) {
     }
 }
 
+/**
+ * VOID ECHO: Core Game Loop with Edge-In Animation (GD Style)
+ * Optimized for performance and GitHub deployment.
+ */
 function gameLoop() {
     if (!isGameStarted) return;
+
+    // 1. Update Global States
     rainbowHue = (rainbowHue + 2) % 360;
     if (isGodMode) updateUI();
     
+    // 2. Monster & Spawning Logic
     if (Date.now() > monster.nextSpawn && !monster.active) {
-        monster.active = true; monster.timer = Date.now() + 3000;
-        monster.x = player.x + (Math.random() > 0.5 ? 400 : -400); monster.y = player.y;
+        monster.active = true; 
+        monster.timer = Date.now() + 3000;
+        monster.x = player.x + (Math.random() > 0.5 ? 400 : -400); 
+        monster.y = player.y;
         monster.nextSpawn = Date.now() + 300000;
     }
     if (monster.active && Date.now() > monster.timer) monster.active = false;
 
+    // 3. Player Physics & Input
     let mx = 0; 
     if (keys['KeyA'] || (isMobile && keys['m-left'])) mx = -SPEED; 
     if (keys['KeyD'] || (isMobile && keys['m-right'])) mx = SPEED;
@@ -166,94 +176,98 @@ function gameLoop() {
     } else {
         player.vx = mx; 
         if (mx !== 0) { player.dir = mx > 0 ? 1 : -1; player.walkTimer += 0.15; }
-        player.x += player.vx; checkColl(player, true);
-        if (player.inWater) player.vy = (keys['Space'] || (isMobile && keys['m-jump'])) ? -4 : Math.min(player.vy + 0.1, 1.5);
-        else { 
+        player.x += player.vx; 
+        checkColl(player, true);
+        
+        if (player.inWater) {
+            player.vy = (keys['Space'] || (isMobile && keys['m-jump'])) ? -4 : Math.min(player.vy + 0.1, 1.5);
+        } else { 
             player.vy += GRAVITY; 
-            if ((keys['Space'] || (isMobile && keys['m-jump'])) && player.grounded) { player.vy = JUMP; player.grounded = false; } 
+            if ((keys['Space'] || (isMobile && keys['m-jump'])) && player.grounded) { 
+                player.vy = JUMP; 
+                player.grounded = false; 
+            } 
         }
-        player.y += player.vy; player.grounded = false; player.inWater = false; checkColl(player, false);
+        player.y += player.vy; 
+        player.grounded = false; 
+        player.inWater = false; 
+        checkColl(player, false);
     }
 
-    clones.forEach(c => { 
-        c.vx = c.dir * SPEED; c.x += c.vx; checkColl(c, true); 
-        c.vy += GRAVITY; if (c.grounded && Math.random() < 0.02) c.vy = JUMP; 
-        c.y += c.vy; c.grounded = false; checkColl(c, false); c.walkTimer += 0.15; 
-    });
-
-    if (++liquidUpdateFrame % 10 === 0) updateLiquids();
-    
-    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    // 4. Canvas Setup
+    canvas.width = window.innerWidth; 
+    canvas.height = window.innerHeight;
     ctx.fillStyle = player.y / TILE > 180 ? "white" : "black"; 
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
+    // 5. World Rendering (Camera Space)
     ctx.save(); 
     ctx.translate(canvas.width / 2, canvas.height / 2); 
     ctx.scale(cameraZoom, cameraZoom); 
     ctx.translate(-player.x, -player.y);
 
-    for (let i = particles.length - 1; i >= 0; i--) {
-        let p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.1; p.life--; 
-        ctx.globalAlpha = Math.max(0, p.life / 300);
-        ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 4, 4); 
-        if (p.life <= 0) particles.splice(i, 1);
-    }
+    // --- EDGE-IN ANIMATION CONSTANTS ---
+    const leftScreenW = player.x - (canvas.width / 2) / cameraZoom;
+    const rightScreenW = player.x + (canvas.width / 2) / cameraZoom;
+    const animBlockZone = TILE * 6; // Zone width (6 blocks)
 
-    // --- GD ANIMATION SYSTEM ---
-    let viewW = (canvas.width / 2) / cameraZoom;
-    let viewH = (canvas.height / 2) / cameraZoom;
-    
-    let leftBoundary = player.x - viewW;
-    let rightBoundary = player.x + viewW;
-    let animZone = TILE * 6; // Зона в пикселях, где начинается анимация
+    // Dynamic Viewport Calculation
+    const vw = (canvas.width / TILE) / cameraZoom / 2 + 2;
+    const vh = (canvas.height / TILE) / cameraZoom / 2 + 2;
 
-    let startX = Math.floor(leftBoundary / TILE) - 1;
-    let endX = Math.ceil(rightBoundary / TILE) + 1;
-    let startY = Math.floor((player.y - viewH) / TILE) - 1;
-    let endY = Math.ceil((player.y + viewH) / TILE) + 1;
-
-    for (let x = startX; x <= endX; x++) {
-        for (let y = startY; y <= endY; y++) {
-            let b = world[`${x},${y}`]; 
+    for (let x = Math.floor(player.x / TILE - vw); x < Math.ceil(player.x / TILE + vw); x++) {
+        for (let y = Math.floor(player.y / TILE - vh); y < Math.ceil(player.y / TILE + vh); y++) {
+            const b = world[`${x},${y}`]; 
             if (!b) continue;
 
-            let blockX = x * TILE;
-            let blockY = y * TILE;
+            const worldX = x * TILE;
+            const worldY = y * TILE;
 
-            // Считаем дистанцию до левого и правого края экрана
-            let dLeft = blockX - leftBoundary;
-            let dRight = rightBoundary - (blockX + TILE);
-            let dist = Math.min(dLeft, dRight);
+            // Distance calculation relative to current viewport edges
+            const distLeft = worldX - leftScreenW;
+            const distRight = rightScreenW - (worldX + TILE);
+            const minDist = Math.min(distLeft, distRight);
+            
+            let yOffset = 0;
+            let blockOpacity = 1;
 
-            let offset = 0;
-            let opacity = 1;
-
-            if (dist < animZone) {
-                let ratio = Math.max(0, dist / animZone);
-                // Плавное появление (Easing)
-                let p = 1 - Math.pow(1 - ratio, 3); 
+            if (minDist < animBlockZone) {
+                const progress = Math.max(0, minDist / animBlockZone);
+                // Cubic easing for "popping" effect
+                const ease = 1 - Math.pow(1 - progress, 3);
                 
-                offset = (1 - p) * 100; // Улетает вниз на 100 пикселей
-                opacity = p;
+                yOffset = (1 - ease) * TILE * 3; // Start 3 blocks below
+                blockOpacity = ease;
             }
 
-            if (opacity <= 0) continue; // Не рисуем невидимые
+            if (blockOpacity <= 0.01) continue; 
 
-            ctx.globalAlpha = opacity;
-            let dy = blockY + offset;
+            ctx.globalAlpha = blockOpacity;
+            const drawY = worldY + yOffset;
 
+            // Block Type Rendering
             if (b.type === 'lava') { 
-                ctx.fillStyle = "#FF8C00"; ctx.fillRect(blockX, dy+4, TILE, TILE-4); 
+                ctx.fillStyle = "#FF8C00"; ctx.fillRect(worldX, drawY + 4, TILE, TILE - 4); 
             } else if (b.type === 'water') { 
-                ctx.fillStyle = "#0077FF"; ctx.fillRect(blockX, dy+4, TILE, TILE-4); 
+                ctx.fillStyle = "#0077FF"; ctx.fillRect(worldX, drawY + 4, TILE, TILE - 4); 
             } else if (b.type === 'rainbow') { 
-                ctx.fillStyle = `hsl(${rainbowHue}, 80%, 50%)`; ctx.fillRect(blockX, dy, TILE, TILE); 
+                ctx.fillStyle = `hsl(${rainbowHue}, 80%, 50%)`; ctx.fillRect(worldX, drawY, TILE, TILE); 
             } else { 
                 ctx.strokeStyle = getDepthColor(y * TILE); 
                 ctx.lineWidth = b.type === 'bedrock' ? 4 : 2; 
-                ctx.strokeRect(blockX + 2, dy + 2, TILE - 4, TILE - 4); 
+                ctx.strokeRect(worldX + 2, drawY + 2, TILE - 4, TILE - 4); 
             }
         }
+    }
+    ctx.globalAlpha = 1;
+
+    // 6. Entities & Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i]; 
+        p.x += p.vx; p.y += p.vy; p.vy += 0.1; p.life--; 
+        ctx.globalAlpha = Math.max(0, p.life / 300);
+        ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 4, 4); 
+        if (p.life <= 0) particles.splice(i, 1);
     }
     ctx.globalAlpha = 1;
 
@@ -263,8 +277,16 @@ function gameLoop() {
     
     ctx.restore();
 
-    if (liquidUpdateFrame % 60 === 0) generateRegion(Math.floor(player.x/TILE)-40, Math.floor(player.x/TILE)+40);
-    if (player.hp <= 0 && !isGodMode) { player.x = 0; player.y = 0; player.hp = 10; updateUI(); }
+    // 7. Background Tasks & Death Check
+    if (++liquidUpdateFrame % 60 === 0) {
+        generateRegion(Math.floor(player.x / TILE) - 40, Math.floor(player.x / TILE) + 40);
+    }
+    if (++liquidUpdateFrame % 10 === 0) updateLiquids();
+
+    if (player.hp <= 0 && !isGodMode) { 
+        player.x = 0; player.y = 0; player.hp = 10; 
+        updateUI(); 
+    }
     
     requestAnimationFrame(gameLoop);
 }
@@ -314,5 +336,6 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
 
 
