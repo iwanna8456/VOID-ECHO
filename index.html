@@ -146,6 +146,7 @@ function gameLoop() {
     rainbowHue = (rainbowHue + 2) % 360;
     if (isGodMode) updateUI();
     
+    // Логика монстра
     if (Date.now() > monster.nextSpawn && !monster.active) {
         monster.active = true; monster.timer = Date.now() + 3000;
         monster.x = player.x + (Math.random() > 0.5 ? 400 : -400); monster.y = player.y;
@@ -153,40 +154,114 @@ function gameLoop() {
     }
     if (monster.active && Date.now() > monster.timer) monster.active = false;
 
-    let mx = 0; if (keys['KeyA'] || (isMobile && keys['m-left'])) mx = -SPEED; if (keys['KeyD'] || (isMobile && keys['m-right'])) mx = SPEED;
+    // Управление игроком
+    let mx = 0; 
+    if (keys['KeyA'] || (isMobile && keys['m-left'])) mx = -SPEED; 
+    if (keys['KeyD'] || (isMobile && keys['m-right'])) mx = SPEED;
+    
     if (isNoclip) {
-        player.vx = player.vy = 0; if (mx < 0) { player.x -= SPEED * 2; player.dir = -1; } if (mx > 0) { player.x += SPEED * 2; player.dir = 1; }
-        if (keys['Space'] || (isMobile && keys['m-jump'])) player.y -= SPEED * 2; if (keys['ShiftLeft']) player.y += SPEED * 2;
+        player.vx = player.vy = 0; 
+        if (mx < 0) { player.x -= SPEED * 2; player.dir = -1; } 
+        if (mx > 0) { player.x += SPEED * 2; player.dir = 1; }
+        if (keys['Space'] || (isMobile && keys['m-jump'])) player.y -= SPEED * 2; 
+        if (keys['ShiftLeft']) player.y += SPEED * 2;
     } else {
-        player.vx = mx; if (mx !== 0) { player.dir = mx > 0 ? 1 : -1; player.walkTimer += 0.15; }
+        player.vx = mx; 
+        if (mx !== 0) { player.dir = mx > 0 ? 1 : -1; player.walkTimer += 0.15; }
         player.x += player.vx; checkColl(player, true);
         if (player.inWater) player.vy = (keys['Space'] || (isMobile && keys['m-jump'])) ? -4 : Math.min(player.vy + 0.1, 1.5);
-        else { player.vy += GRAVITY; if ((keys['Space'] || (isMobile && keys['m-jump'])) && player.grounded) { player.vy = JUMP; player.grounded = false; } }
+        else { 
+            player.vy += GRAVITY; 
+            if ((keys['Space'] || (isMobile && keys['m-jump'])) && player.grounded) { player.vy = JUMP; player.grounded = false; } 
+        }
         player.y += player.vy; player.grounded = false; player.inWater = false; checkColl(player, false);
     }
-    clones.forEach(c => { c.vx = c.dir * SPEED; c.x += c.vx; checkColl(c, true); c.vy += GRAVITY; if (c.grounded && Math.random() < 0.02) c.vy = JUMP; c.y += c.vy; c.grounded = false; checkColl(c, false); c.walkTimer += 0.15; });
+
+    // Обновление клонов
+    clones.forEach(c => { 
+        c.vx = c.dir * SPEED; c.x += c.vx; checkColl(c, true); 
+        c.vy += GRAVITY; if (c.grounded && Math.random() < 0.02) c.vy = JUMP; 
+        c.y += c.vy; c.grounded = false; checkColl(c, false); c.walkTimer += 0.15; 
+    });
+
     if (++liquidUpdateFrame % 10 === 0) updateLiquids();
+    
+    // Отрисовка
     canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-    ctx.fillStyle = player.y / TILE > 180 ? "white" : "black"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.save(); ctx.translate(canvas.width / 2, canvas.height / 2); ctx.scale(cameraZoom, cameraZoom); ctx.translate(-player.x, -player.y);
+    ctx.fillStyle = player.y / TILE > 180 ? "white" : "black"; 
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.save(); 
+    ctx.translate(canvas.width / 2, canvas.height / 2); 
+    ctx.scale(cameraZoom, cameraZoom); 
+    ctx.translate(-player.x, -player.y);
+
+    // Частицы
     for (let i = particles.length - 1; i >= 0; i--) {
-        let p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.1; p.life--; ctx.globalAlpha = Math.max(0, p.life / 300);
-        ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 4, 4); if (p.life <= 0) particles.splice(i, 1);
+        let p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.1; p.life--; 
+        ctx.globalAlpha = Math.max(0, p.life / 300);
+        ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 4, 4); 
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // --- ОТРИСОВКА МИРА С АНИМАЦИЕЙ (GD STYLE) ---
+    let vw = (canvas.width / TILE) / cameraZoom / 2 + 2;
+    let vh = (canvas.height / TILE) / cameraZoom / 2 + 2;
+    let leftEdge = player.x / TILE - vw;
+    let rightEdge = player.x / TILE + vw;
+    let animRange = 6; // Ширина зоны анимации в блоках
+
+    for (let x = Math.floor(leftEdge); x < Math.ceil(rightEdge); x++) {
+        for (let y = Math.floor(player.y / TILE - vh); y < Math.ceil(player.y / TILE + vh); y++) {
+            let b = world[`${x},${y}`]; 
+            if (!b) continue;
+
+            // Расчет дистанции до ближайшего края экрана
+            let distToLeft = x - leftEdge;
+            let distToRight = rightEdge - x;
+            let minDist = Math.min(distToLeft, distToRight);
+            
+            let offset = 0;
+            let opacity = 1;
+
+            if (minDist < animRange) {
+                // Плавный коэффициент от 0 до 1
+                let progress = Math.max(0, minDist / animRange);
+                progress = Math.pow(progress, 2); // Более резкое появление у края
+                
+                offset = (1 - progress) * TILE * 2.5; // Смещение по вертикали (из низа)
+                opacity = progress; // Прозрачность
+            }
+
+            ctx.globalAlpha = opacity;
+            let drawY = y * TILE + offset;
+
+            if (b.type === 'lava') { 
+                ctx.fillStyle = "#FF8C00"; ctx.fillRect(x*TILE, drawY+4, TILE, TILE-4); 
+            } else if (b.type === 'water') { 
+                ctx.fillStyle = "#0077FF"; ctx.fillRect(x*TILE, drawY+4, TILE, TILE-4); 
+            } else if (b.type === 'rainbow') { 
+                ctx.fillStyle = `hsl(${rainbowHue}, 80%, 50%)`; ctx.fillRect(x*TILE, drawY, TILE, TILE); 
+            } else { 
+                ctx.strokeStyle = getDepthColor(y * TILE); 
+                ctx.lineWidth = b.type === 'bedrock' ? 4 : 2; 
+                ctx.strokeRect(x * TILE + 2, drawY + 2, TILE - 4, TILE - 4); 
+            }
+        }
     }
     ctx.globalAlpha = 1;
-    let vw = (canvas.width / TILE) / cameraZoom / 2 + 2, vh = (canvas.height / TILE) / cameraZoom / 2 + 2;
-    for (let x = Math.floor(player.x / TILE - vw); x < Math.ceil(player.x / TILE + vw); x++) for (let y = Math.floor(player.y / TILE - vh); y < Math.ceil(player.y / TILE + vh); y++) {
-        let b = world[`${x},${y}`]; if (!b) continue;
-        if (b.type === 'lava') { ctx.fillStyle = "#FF8C00"; ctx.fillRect(x*TILE, y*TILE+4, TILE, TILE-4); }
-        else if (b.type === 'water') { ctx.fillStyle = "#0077FF"; ctx.fillRect(x*TILE, y*TILE+4, TILE, TILE-4); }
-        else if (b.type === 'rainbow') { ctx.fillStyle = `hsl(${rainbowHue}, 80%, 50%)`; ctx.fillRect(x*TILE, y*TILE, TILE, TILE); }
-        else { ctx.strokeStyle = getDepthColor(y * TILE); ctx.lineWidth = b.type === 'bedrock' ? 4 : 2; ctx.strokeRect(x * TILE + 2, y * TILE + 2, TILE - 4, TILE - 4); }
-    }
+
+    // Персонажи
     drawChar(player.x, player.y, player.dir, player.walkTimer, player.hurtTint);
     if (monster.active) drawChar(monster.x, monster.y, monster.x > player.x ? -1 : 1, 0, 0, true);
-    clones.forEach(c => drawChar(c.x, c.y, c.dir, c.walkTimer, 0)); ctx.restore();
+    clones.forEach(c => drawChar(c.x, c.y, c.dir, c.walkTimer, 0)); 
+    
+    ctx.restore();
+
+    // Фоновая генерация и смерть
     if (liquidUpdateFrame % 60 === 0) generateRegion(Math.floor(player.x/TILE)-40, Math.floor(player.x/TILE)+40);
     if (player.hp <= 0 && !isGodMode) { player.x = 0; player.y = 0; player.hp = 10; updateUI(); }
+    
     requestAnimationFrame(gameLoop);
 }
 
@@ -235,3 +310,4 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
