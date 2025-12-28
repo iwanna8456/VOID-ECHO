@@ -75,78 +75,33 @@ function updateLiquids() {
     }
 }
 
+// Улучшенное перемешивание сида
 function cyrb128(str) {
     let h1 = 1779033703, h2 = 1911520191, h3 = 2854904213, h4 = 3387418403;
     for (let i = 0, k; i < str.length; i++) {
         k = str.charCodeAt(i);
-        h1 = h2 ^ Math.imul(h1 ^ k, 597399067); h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+        h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+        h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+        h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+        h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
     }
-    return [(h1^h2^h3^h4)>>>0, (h2^h1)>>>0];
+    h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+    h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+    h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+    h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+    return [(h1^h2^h3^h4)>>>0, (h2^h1)>>>0, (h3^h1)>>>0, (h4^h1)>>>0];
 }
 
-function sfc32(a, b) { return function() { a >>>= 0; b >>>= 0; var t = (a + b | 0); a = b ^ b >>> 9; b = t; return (t >>> 0) / 4294967296; } }
-
-/**
- * Advanced Terrain Generator 2025
- * Features: Multi-octave noise, Cave systems, Seed-based consistency.
- */
-function generateRegion(startX, endX) {
-    const storageKey = `void_echo_v1_${currentSeed}`;
-    const mods = JSON.parse(localStorage.getItem(storageKey) || '{}');
-    
-    // Функция псевдорандома по координатам (Deterministic Noise)
-    const hash = (x, y) => {
-        let h = Math.sin(x * 12.9898 + y * 78.233 + currentSeed.length) * 43758.5453123;
-        return h - Math.floor(h);
-    };
-
-    for (let x = startX; x < endX; x++) {
-        // Генерируем базовую высоту ландшафта (очень непредсказуемую)
-        let n1 = hash(x * 0.07, 0.1) * 20;
-        let n2 = hash(x * 0.02, 0.2) * 40;
-        let baseHeight = Math.floor(50 + n1 + n2);
-
-        for (let y = baseHeight - 20; y < 180; y++) {
-            let key = `${x},${y}`;
-            if (world[key]) continue;
-
-            // Загрузка правок игрока
-            if (mods[key]) {
-                if (mods[key] === "deleted") continue;
-                world[key] = { type: mods[key], modified: true };
-                continue;
-            }
-
-            // ШУМ ДЛЯ ПУСТОТ И ОСТРОВОВ (создает дыры и парящие блоки)
-            let density = hash(x * 0.1, y * 0.1);
-            let caveMask = hash(x * 0.05, y * 0.05);
-
-            // Бедрок
-            if (y >= 175) { world[key] = { type: 'bedrock' }; continue; }
-
-            // Логика формирования блоков
-            if (y < baseHeight) {
-                // ПАРИЯЩИЕ ОСТРОВА (только если шум выше порога)
-                if (density > 0.82 && caveMask > 0.5) {
-                    world[key] = { type: 'stone' };
-                }
-                continue;
-            }
-
-            // ОСНОВНАЯ ЗЕМЛЯ с пещерами
-            if (caveMask > 0.75) continue; // Это пещера
-
-            // Слои почвы
-            if (y < 130) {
-                if (y === baseHeight) world[key] = { type: 'grass' };
-                else if (y < baseHeight + 4) world[key] = { type: 'dirt' };
-                else world[key] = { type: 'stone' };
-            } else {
-                // АД (случайные скопления лавы)
-                if (hash(x, y) > 0.93) world[key] = { type: 'lava', dist: 0 };
-                else world[key] = { type: 'hellstone' };
-            }
-        }
+function sfc32(a, b, c, d) {
+    return function() {
+        a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0; 
+        var t = (a + b | 0) + d | 0;
+        d = d + 1 | 0;
+        a = b ^ b >>> 9;
+        b = c + (c << 3) | 0;
+        c = (c << 21 | c >>> 11);
+        c = c + t | 0;
+        return (t >>> 0) / 4294967296;
     }
 }
 
@@ -189,10 +144,79 @@ function checkColl(obj, isX) {
     }
 }
 
-/**
- * VOID ECHO: Core Game Loop with Edge-In Animation (GD Style)
- * Optimized for performance and GitHub deployment.
- */
+// --- ГЕНЕРАТОР БЕСКОНЕЧНОГО МИРА ---
+function generateRegion(startX, endX) {
+    const storageKey = 'void_echo_v1_' + currentSeed;
+    const mods = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    
+    // Используем сид для создания уникальных коэффициентов шума
+    const [s1, s2, s3, s4] = cyrb128(currentSeed);
+    
+    // Функция псевдо-шума, привязанная к координатам и сиду
+    const hash = (x, y) => {
+        let h = Math.sin(x * (s1 % 100) + y * (s2 % 100)) * (s3 % 10000);
+        return h - Math.floor(h);
+    };
+
+    for (let x = startX; x < endX; x++) {
+        // Создаем непредсказуемый рельеф (смешиваем разные частоты)
+        let n1 = Math.sin(x * 0.04 + (s1 % 10)) * 12;
+        let n2 = Math.cos(x * 0.1 + (s2 % 5)) * 8;
+        let n3 = Math.sin(x * 0.01) * 20; // Глобальные горы
+        
+        let terrainHeight = Math.floor(70 + n1 + n2 + n3);
+
+        // Генерируем блоки от верхушки до низа
+        for (let y = terrainHeight - 30; y < 180; y++) {
+            let key = `${x},${y}`;
+            
+            // Если блок уже есть или был изменен игроком - не трогаем
+            if (world[key]) continue;
+            if (mods[key]) {
+                if (mods[key] === "deleted") continue;
+                world[key] = { type: mods[key], modified: true };
+                continue;
+            }
+
+            // Граница мира (Бедрок)
+            if (y >= 175) { world[key] = { type: 'bedrock' }; continue; }
+
+            // Маски для пещер и островов
+            let density = hash(x * 0.1, y * 0.1);
+            let caveMask = hash(x * 0.07, y * 0.07);
+
+            // 1. Небо и парящие острова
+            if (y < terrainHeight) {
+                if (density > 0.86 && y > 25) {
+                    world[key] = { type: 'stone' };
+                }
+                continue;
+            }
+
+            // 2. Пещеры (пустоты в земле)
+            if (caveMask > 0.8) continue; 
+
+            // 3. Основные слои почвы
+            if (y < 140) {
+                if (y === terrainHeight) {
+                    world[key] = { type: 'grass' };
+                } else if (y < terrainHeight + 5) {
+                    world[key] = { type: 'dirt' };
+                } else {
+                    world[key] = { type: 'stone' };
+                }
+            } else {
+                // 4. Адская зона
+                if (hash(x, y) > 0.95) {
+                    world[key] = { type: 'lava', dist: 0 };
+                } else {
+                    world[key] = { type: 'hellstone' };
+                }
+            }
+        }
+    }
+}
+
 function gameLoop() {
     if (!isGameStarted) return;
 
@@ -200,9 +224,10 @@ function gameLoop() {
     rainbowHue = (rainbowHue + 2) % 360;
     if (isGodMode) updateUI();
     
-    // 2. Логика бесконечного мира: генерируем область вокруг игрока
-    let playerTileX = Math.floor(player.x / TILE);
-    generateRegion(playerTileX - 50, playerTileX + 50);
+    // 2. БЕСКОНЕЧНЫЙ МИР: Генерируем блоки вокруг игрока в реальном времени
+    // Это позволяет идти бесконечно в любую сторону
+    let currentTileX = Math.floor(player.x / TILE);
+    generateRegion(currentTileX - 50, currentTileX + 50);
 
     // 3. Управление и физика игрока
     let mx = 0; 
@@ -236,7 +261,7 @@ function gameLoop() {
         checkColl(player, false);
     }
 
-    // 4. Логика клонов и жидкостей
+    // 4. Обновление сущностей (клоны и жидкости)
     clones.forEach(c => { 
         c.vx = c.dir * SPEED; c.x += c.vx; checkColl(c, true); 
         c.vy += GRAVITY; if (c.grounded && Math.random() < 0.02) c.vy = JUMP; 
@@ -244,70 +269,72 @@ function gameLoop() {
     });
     if (++liquidUpdateFrame % 10 === 0) updateLiquids();
 
-    // 5. Подготовка холста (Canvas)
+    // 5. Отрисовка (Canvas)
     canvas.width = window.innerWidth; 
     canvas.height = window.innerHeight;
     ctx.fillStyle = player.y / TILE > 180 ? "white" : "black"; 
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    // 6. Отрисовка мира (Камера)
+    // 6. Камера (Мировое пространство)
     ctx.save(); 
     ctx.translate(canvas.width / 2, canvas.height / 2); 
     ctx.scale(cameraZoom, cameraZoom); 
     ctx.translate(-player.x, -player.y);
 
-    // Параметры для GD-анимации краев
-    const leftW = player.x - (canvas.width / 2) / cameraZoom;
-    const rightW = player.x + (canvas.width / 2) / cameraZoom;
-    const animZone = TILE * 6; 
+    // Параметры для анимации краев экрана (GD Style)
+    const viewHalfW = (canvas.width / 2) / cameraZoom;
+    const leftEdge = player.x - viewHalfW;
+    const rightEdge = player.x + viewHalfW;
+    const animZoneWidth = TILE * 6; // Ширина зоны появления
 
-    const vw = (canvas.width / TILE) / cameraZoom / 2 + 2;
+    const vw = viewHalfW / TILE + 2;
     const vh = (canvas.height / TILE) / cameraZoom / 2 + 2;
 
+    // 7. Отрисовка блоков мира
     for (let x = Math.floor(player.x / TILE - vw); x < Math.ceil(player.x / TILE + vw); x++) {
         for (let y = Math.floor(player.y / TILE - vh); y < Math.ceil(player.y / TILE + vh); y++) {
             const b = world[`${x},${y}`]; 
             if (!b) continue;
 
-            const worldX = x * TILE;
-            const worldY = y * TILE;
+            const wx = x * TILE;
+            const wy = y * TILE;
 
-            // Расчет дистанции для анимации появления
-            const distL = worldX - leftW;
-            const distR = rightW - (worldX + TILE);
-            const minDist = Math.min(distL, distR);
+            // Логика анимации: блоки выплывают снизу у краев экрана
+            const dL = wx - leftEdge;
+            const dR = rightEdge - (wx + TILE);
+            const minDist = Math.min(dL, dR);
             
-            let yOff = 0;
-            let alpha = 1;
+            let yOffset = 0;
+            let opacity = 1;
 
-            if (minDist < animZone) {
-                let p = Math.max(0, minDist / animZone);
-                let ease = 1 - Math.pow(1 - p, 3); // Cubic ease-out
-                yOff = (1 - ease) * TILE * 3;
-                alpha = ease;
+            if (minDist < animZoneWidth) {
+                let p = Math.max(0, minDist / animZoneWidth);
+                let ease = 1 - Math.pow(1 - p, 3); // Плавное кубическое появление
+                yOffset = (1 - ease) * TILE * 3;
+                opacity = ease;
             }
 
-            if (alpha <= 0.01) continue;
+            if (opacity <= 0.01) continue;
 
-            ctx.globalAlpha = alpha;
-            const dy = worldY + yOff;
+            ctx.globalAlpha = opacity;
+            const finalY = wy + yOffset;
 
             if (b.type === 'lava') { 
-                ctx.fillStyle = "#FF8C00"; ctx.fillRect(worldX, dy+4, TILE, TILE-4); 
+                ctx.fillStyle = "#FF8C00"; ctx.fillRect(wx, finalY+4, TILE, TILE-4); 
             } else if (b.type === 'water') { 
-                ctx.fillStyle = "#0077FF"; ctx.fillRect(worldX, dy+4, TILE, TILE-4); 
+                ctx.fillStyle = "#0077FF"; ctx.fillRect(wx, finalY+4, TILE, TILE-4); 
             } else if (b.type === 'rainbow') { 
-                ctx.fillStyle = `hsl(${rainbowHue}, 80%, 50%)`; ctx.fillRect(worldX, dy, TILE, TILE); 
+                ctx.fillStyle = `hsl(${rainbowHue}, 80%, 50%)`; ctx.fillRect(wx, finalY, TILE, TILE); 
             } else { 
                 ctx.strokeStyle = getDepthColor(y * TILE); 
                 ctx.lineWidth = b.type === 'bedrock' ? 4 : 2; 
-                ctx.strokeRect(worldX + 2, dy + 2, TILE - 4, TILE - 4); 
+                ctx.strokeRect(wx + 2, finalY + 2, TILE - 4, TILE - 4); 
             }
         }
     }
     ctx.globalAlpha = 1;
 
-    // 7. Отрисовка сущностей (игрок, монстр, частицы)
+    // 8. Частицы и персонажи
     for (let i = particles.length - 1; i >= 0; i--) {
         let p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.1; p.life--; 
         ctx.globalAlpha = Math.max(0, p.life / 300);
@@ -322,7 +349,7 @@ function gameLoop() {
     
     ctx.restore();
 
-    // 8. Проверка смерти
+    // 9. Смерть игрока
     if (player.hp <= 0 && !isGodMode) { 
         player.x = 0; player.y = 0; player.hp = 10; updateUI(); 
     }
@@ -375,6 +402,7 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
 
 
 
