@@ -146,7 +146,6 @@ function gameLoop() {
     rainbowHue = (rainbowHue + 2) % 360;
     if (isGodMode) updateUI();
     
-    // Логика монстра
     if (Date.now() > monster.nextSpawn && !monster.active) {
         monster.active = true; monster.timer = Date.now() + 3000;
         monster.x = player.x + (Math.random() > 0.5 ? 400 : -400); monster.y = player.y;
@@ -154,7 +153,6 @@ function gameLoop() {
     }
     if (monster.active && Date.now() > monster.timer) monster.active = false;
 
-    // Управление игроком
     let mx = 0; 
     if (keys['KeyA'] || (isMobile && keys['m-left'])) mx = -SPEED; 
     if (keys['KeyD'] || (isMobile && keys['m-right'])) mx = SPEED;
@@ -177,7 +175,6 @@ function gameLoop() {
         player.y += player.vy; player.grounded = false; player.inWater = false; checkColl(player, false);
     }
 
-    // Обновление клонов
     clones.forEach(c => { 
         c.vx = c.dir * SPEED; c.x += c.vx; checkColl(c, true); 
         c.vy += GRAVITY; if (c.grounded && Math.random() < 0.02) c.vy = JUMP; 
@@ -186,7 +183,6 @@ function gameLoop() {
 
     if (++liquidUpdateFrame % 10 === 0) updateLiquids();
     
-    // Отрисовка
     canvas.width = window.innerWidth; canvas.height = window.innerHeight;
     ctx.fillStyle = player.y / TILE > 180 ? "white" : "black"; 
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -196,7 +192,6 @@ function gameLoop() {
     ctx.scale(cameraZoom, cameraZoom); 
     ctx.translate(-player.x, -player.y);
 
-    // Частицы
     for (let i = particles.length - 1; i >= 0; i--) {
         let p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.1; p.life--; 
         ctx.globalAlpha = Math.max(0, p.life / 300);
@@ -204,61 +199,70 @@ function gameLoop() {
         if (p.life <= 0) particles.splice(i, 1);
     }
 
-    // --- ОТРИСОВКА МИРА С АНИМАЦИЕЙ (GD STYLE) ---
-    let vw = (canvas.width / TILE) / cameraZoom / 2 + 2;
-    let vh = (canvas.height / TILE) / cameraZoom / 2 + 2;
-    let leftEdge = player.x / TILE - vw;
-    let rightEdge = player.x / TILE + vw;
-    let animRange = 6; // Ширина зоны анимации в блоках
+    // --- GD ANIMATION SYSTEM ---
+    let viewW = (canvas.width / 2) / cameraZoom;
+    let viewH = (canvas.height / 2) / cameraZoom;
+    
+    let leftBoundary = player.x - viewW;
+    let rightBoundary = player.x + viewW;
+    let animZone = TILE * 6; // Зона в пикселях, где начинается анимация
 
-    for (let x = Math.floor(leftEdge); x < Math.ceil(rightEdge); x++) {
-        for (let y = Math.floor(player.y / TILE - vh); y < Math.ceil(player.y / TILE + vh); y++) {
+    let startX = Math.floor(leftBoundary / TILE) - 1;
+    let endX = Math.ceil(rightBoundary / TILE) + 1;
+    let startY = Math.floor((player.y - viewH) / TILE) - 1;
+    let endY = Math.ceil((player.y + viewH) / TILE) + 1;
+
+    for (let x = startX; x <= endX; x++) {
+        for (let y = startY; y <= endY; y++) {
             let b = world[`${x},${y}`]; 
             if (!b) continue;
 
-            // Расчет дистанции до ближайшего края экрана
-            let distToLeft = x - leftEdge;
-            let distToRight = rightEdge - x;
-            let minDist = Math.min(distToLeft, distToRight);
-            
+            let blockX = x * TILE;
+            let blockY = y * TILE;
+
+            // Считаем дистанцию до левого и правого края экрана
+            let dLeft = blockX - leftBoundary;
+            let dRight = rightBoundary - (blockX + TILE);
+            let dist = Math.min(dLeft, dRight);
+
             let offset = 0;
             let opacity = 1;
 
-            if (minDist < animRange) {
-                // Плавный коэффициент от 0 до 1
-                let progress = Math.max(0, minDist / animRange);
-                progress = Math.pow(progress, 2); // Более резкое появление у края
+            if (dist < animZone) {
+                let ratio = Math.max(0, dist / animZone);
+                // Плавное появление (Easing)
+                let p = 1 - Math.pow(1 - ratio, 3); 
                 
-                offset = (1 - progress) * TILE * 2.5; // Смещение по вертикали (из низа)
-                opacity = progress; // Прозрачность
+                offset = (1 - p) * 100; // Улетает вниз на 100 пикселей
+                opacity = p;
             }
 
+            if (opacity <= 0) continue; // Не рисуем невидимые
+
             ctx.globalAlpha = opacity;
-            let drawY = y * TILE + offset;
+            let dy = blockY + offset;
 
             if (b.type === 'lava') { 
-                ctx.fillStyle = "#FF8C00"; ctx.fillRect(x*TILE, drawY+4, TILE, TILE-4); 
+                ctx.fillStyle = "#FF8C00"; ctx.fillRect(blockX, dy+4, TILE, TILE-4); 
             } else if (b.type === 'water') { 
-                ctx.fillStyle = "#0077FF"; ctx.fillRect(x*TILE, drawY+4, TILE, TILE-4); 
+                ctx.fillStyle = "#0077FF"; ctx.fillRect(blockX, dy+4, TILE, TILE-4); 
             } else if (b.type === 'rainbow') { 
-                ctx.fillStyle = `hsl(${rainbowHue}, 80%, 50%)`; ctx.fillRect(x*TILE, drawY, TILE, TILE); 
+                ctx.fillStyle = `hsl(${rainbowHue}, 80%, 50%)`; ctx.fillRect(blockX, dy, TILE, TILE); 
             } else { 
                 ctx.strokeStyle = getDepthColor(y * TILE); 
                 ctx.lineWidth = b.type === 'bedrock' ? 4 : 2; 
-                ctx.strokeRect(x * TILE + 2, drawY + 2, TILE - 4, TILE - 4); 
+                ctx.strokeRect(blockX + 2, dy + 2, TILE - 4, TILE - 4); 
             }
         }
     }
     ctx.globalAlpha = 1;
 
-    // Персонажи
     drawChar(player.x, player.y, player.dir, player.walkTimer, player.hurtTint);
     if (monster.active) drawChar(monster.x, monster.y, monster.x > player.x ? -1 : 1, 0, 0, true);
     clones.forEach(c => drawChar(c.x, c.y, c.dir, c.walkTimer, 0)); 
     
     ctx.restore();
 
-    // Фоновая генерация и смерть
     if (liquidUpdateFrame % 60 === 0) generateRegion(Math.floor(player.x/TILE)-40, Math.floor(player.x/TILE)+40);
     if (player.hp <= 0 && !isGodMode) { player.x = 0; player.y = 0; player.hp = 10; updateUI(); }
     
@@ -310,4 +314,5 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
 
