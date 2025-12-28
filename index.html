@@ -149,68 +149,62 @@ function generateRegion(startX, endX) {
     const storageKey = 'void_echo_v1_' + currentSeed;
     const mods = JSON.parse(localStorage.getItem(storageKey) || '{}');
     
-    // Используем сид для создания уникальных коэффициентов шума
+    // Берем 4 числа из сида для создания уникального шума
     const [s1, s2, s3, s4] = cyrb128(currentSeed);
     
-    // Функция псевдо-шума, привязанная к координатам и сиду
-    const hash = (x, y) => {
-        let h = Math.sin(x * (s1 % 100) + y * (s2 % 100)) * (s3 % 10000);
-        return h - Math.floor(h);
+    // Функция "Хаоса" по координатам
+    const noise = (x, y, scale) => {
+        let n = Math.sin(x * scale + (s1 % 500)) * Math.cos(y * scale + (s2 % 500)) * (s3 % 100);
+        return n - Math.floor(n);
     };
 
     for (let x = startX; x < endX; x++) {
-        // Создаем непредсказуемый рельеф (смешиваем разные частоты)
-        let n1 = Math.sin(x * 0.04 + (s1 % 10)) * 12;
-        let n2 = Math.cos(x * 0.1 + (s2 % 5)) * 8;
-        let n3 = Math.sin(x * 0.01) * 20; // Глобальные горы
-        
-        let terrainHeight = Math.floor(70 + n1 + n2 + n3);
+        // Рандомная базовая линия (сильно скачет)
+        let baseLine = 60 + Math.sin(x * 0.05) * 20 + noise(x, 0, 0.1) * 10;
 
-        // Генерируем блоки от верхушки до низа
-        for (let y = terrainHeight - 30; y < 180; y++) {
+        for (let y = 10; y < 180; y++) {
             let key = `${x},${y}`;
-            
-            // Если блок уже есть или был изменен игроком - не трогаем
             if (world[key]) continue;
+
+            // Загрузка правок игрока (чтобы не пропадали постройки)
             if (mods[key]) {
                 if (mods[key] === "deleted") continue;
                 world[key] = { type: mods[key], modified: true };
                 continue;
             }
 
-            // Граница мира (Бедрок)
+            // Бедрок
             if (y >= 175) { world[key] = { type: 'bedrock' }; continue; }
 
-            // Маски для пещер и островов
-            let density = hash(x * 0.1, y * 0.1);
-            let caveMask = hash(x * 0.07, y * 0.07);
+            // ГЕНЕРАЦИЯ СТРУКТУР (Парящие острова, пещеры, разломы)
+            // Мы смешиваем два шума разного масштаба
+            let nLarge = noise(x * 0.08, y * 0.08, 0.5);
+            let nSmall = noise(x * 0.2, y * 0.2, 0.2);
+            let density = (nLarge + nSmall) / 2;
 
-            // 1. Небо и парящие острова
-            if (y < terrainHeight) {
-                if (density > 0.86 && y > 25) {
+            // Основная логика: блок ставится, если плотность шума выше порога
+            // Порог плавно меняется в зависимости от глубины (y)
+            let threshold = 0.7; // Базовая пустота
+            
+            // Чем ниже, тем больше шансов у земли быть плотной
+            if (y > baseLine) threshold = 0.45; 
+            if (y > baseLine + 20) threshold = 0.35;
+
+            // Если шум прошел проверку - ставим блок
+            if (density > threshold) {
+                // Выбор типа блока в зависимости от глубины
+                if (y < baseLine) {
+                    world[key] = { type: 'stone' }; // Парящие острова в небе
+                } else if (y < baseLine + 2) {
+                    // Трава только если над блоком воздух
+                    let above = `${x},${y-1}`;
+                    world[key] = { type: (density > threshold && !world[above]) ? 'grass' : 'dirt' };
+                } else if (y < 140) {
                     world[key] = { type: 'stone' };
-                }
-                continue;
-            }
-
-            // 2. Пещеры (пустоты в земле)
-            if (caveMask > 0.8) continue; 
-
-            // 3. Основные слои почвы
-            if (y < 140) {
-                if (y === terrainHeight) {
-                    world[key] = { type: 'grass' };
-                } else if (y < terrainHeight + 5) {
-                    world[key] = { type: 'dirt' };
                 } else {
-                    world[key] = { type: 'stone' };
-                }
-            } else {
-                // 4. Адская зона
-                if (hash(x, y) > 0.95) {
-                    world[key] = { type: 'lava', dist: 0 };
-                } else {
-                    world[key] = { type: 'hellstone' };
+                    // Зона ада
+                    if (noise(x, y, 1) > 0.9) world[key] = { type: 'lava', dist: 0 };
+                    else world[key] = { type: 'hellstone' };
                 }
             }
         }
@@ -402,6 +396,7 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
 
 
 
