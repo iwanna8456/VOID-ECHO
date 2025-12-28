@@ -86,18 +86,70 @@ function cyrb128(str) {
 
 function sfc32(a, b) { return function() { a >>>= 0; b >>>= 0; var t = (a + b | 0); a = b ^ b >>> 9; b = t; return (t >>> 0) / 4294967296; } }
 
+/**
+ * Advanced Terrain Generator 2025
+ * Features: Multi-octave noise, Cave systems, Seed-based consistency.
+ */
 function generateRegion(startX, endX) {
-    const mods = JSON.parse(localStorage.getItem('void_echo_v1_' + currentSeed) || '{}');
-    const h = cyrb128(currentSeed), rand = sfc32(h, h);
+    const storageKey = `void_echo_v1_${currentSeed}`;
+    const mods = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    const [s1, s2] = cyrb128(currentSeed);
+    const rand = sfc32(s1, s2);
+
     for (let x = startX; x < endX; x++) {
-        let surf = 15 + Math.floor(Math.sin(x * 0.1) * 5 + Math.cos(x * 0.05) * 3);
-        for (let y = surf; y < 180; y++) {
-            let key = `${x},${y}`;
+        // 1. Surface generation using layered sine waves (pseudo-perlin)
+        const bigHills = Math.sin(x * 0.05) * 15;
+        const smallBumps = Math.cos(x * 0.15) * 5;
+        const microDetail = Math.sin(x * 0.4) * 2;
+        
+        const surfaceY = Math.floor(60 + bigHills + smallBumps + microDetail);
+
+        for (let y = surfaceY; y < 180; y++) {
+            const key = `${x},${y}`;
             if (world[key]) continue;
-            if (mods[key]) { if (mods[key] === "deleted") continue; world[key] = { type: mods[key], modified: true }; continue; }
-            if (y === 175) { world[key] = {type: 'bedrock'}; continue; }
-            if (y < 95) world[key] = {type: (y === surf) ? 'grass' : (y > surf + 10 ? 'stone' : 'dirt')};
-            else if (y >= 135 && y > 140 + Math.sin(x * 0.2) * 5) world[key] = {type: rand() > 0.3 ? 'hellstone' : 'lava', dist: 0};
+
+            // 2. Load user modifications
+            if (mods[key]) {
+                if (mods[key] === "deleted") continue;
+                world[key] = { type: mods[key], modified: true };
+                continue;
+            }
+
+            // 3. Bedrock Layer
+            if (y >= 175) { 
+                world[key] = { type: 'bedrock' }; 
+                continue; 
+            }
+
+            // 4. Cave System Logic (3D Noise mask)
+            const caveDensity = Math.sin(x * 0.15) * Math.cos(y * 0.15) + Math.sin(y * 0.08);
+            if (y > surfaceY + 8 && caveDensity > 0.75) {
+                // Occasional liquid in caves
+                if (caveDensity > 0.92 && y > 100) {
+                    world[key] = { type: rand() > 0.5 ? 'water' : 'lava', dist: 0 };
+                }
+                continue; 
+            }
+
+            // 5. Biome Stratification
+            if (y < 130) {
+                // Upper World
+                if (y === surfaceY) {
+                    world[key] = { type: 'grass' };
+                } else if (y < surfaceY + 5) {
+                    world[key] = { type: 'dirt' };
+                } else {
+                    world[key] = { type: 'stone' };
+                }
+            } else {
+                // Underworld (Hell biome)
+                const hellChaos = Math.sin(x * 0.4 + y * 0.2);
+                if (hellChaos > 0.5) {
+                    world[key] = { type: 'lava', dist: 0 };
+                } else {
+                    world[key] = { type: 'hellstone' };
+                }
+            }
         }
     }
 }
@@ -336,6 +388,7 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
 
 
 
