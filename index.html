@@ -183,31 +183,31 @@ function checkColl(obj, isX) {
 // 1. Генерирует высоту поверхности для координаты X
 function generateSurfaceHeight(x) {
     const [s1] = cyrb128(currentSeed);
-    const noiseScale = 0.05;
-    const amplitude = 40;
+    const noiseScale = 0.03; // Более плавные холмы
+    const amplitude = 50;    // Больший разброс высот
     const baseHeight = 80;
     
     // Основной шум для крупного рельефа
     let mainNoise = smoothNoise(x * noiseScale, 0, s1) * amplitude;
     
-    // Детализация
-    let detailNoise = smoothNoise(x * 0.15, 100, s1) * 12;
+    // Детализация (средние холмы)
+    let detailNoise = smoothNoise(x * 0.08, 100, s1) * 20;
     
     // Мелкие детали
-    let smallDetail = smoothNoise(x * 0.3, 200, s1) * 6;
+    let smallDetail = smoothNoise(x * 0.2, 200, s1) * 8;
     
     // Комбинируем все слои
     let height = baseHeight + mainNoise + detailNoise + smallDetail;
     
     // Ограничиваем высоту
-    return Math.floor(Math.max(40, Math.min(120, height)));
+    return Math.floor(Math.max(50, Math.min(110, height)));
 }
 
 // 2. Находит минимальную высоту поверхности в радиусе
 function findMinSurfaceHeight(x) {
     let minHeight = generateSurfaceHeight(x);
     
-    for (let dx = -5; dx <= 5; dx++) {
+    for (let dx = -3; dx <= 3; dx++) {
         let nearbyHeight = generateSurfaceHeight(x + dx);
         if (nearbyHeight < minHeight) {
             minHeight = nearbyHeight;
@@ -220,8 +220,8 @@ function findMinSurfaceHeight(x) {
 // 3. Возвращает цвет для градиента
 function getDepthColorForGradient(y) {
     // y - высота в градиентном слое (0-20)
-    if (y < 0) return "white";
-    if (y > 20) return "rgb(255, 0, 0)";
+    if (y <= 0) return "white";
+    if (y >= 20) return "rgb(255, 0, 0)";
     
     let normalizedY = y / 20;
     let red = 255;
@@ -229,6 +229,23 @@ function getDepthColorForGradient(y) {
     let blue = Math.floor(255 * (1 - normalizedY));
     
     return `rgb(${red}, ${green}, ${blue})`;
+}
+
+function isCave(x, y, surfaceHeight) {
+    const [s1, s2] = cyrb128(currentSeed);
+    
+    // Только под землей
+    if (y >= surfaceHeight - 5) return false;
+    
+    // Большие пещеры глубоко
+    let bigCaveNoise = smoothNoise(x * 0.1, y * 0.1, s1);
+    if (y > 60 && bigCaveNoise > 0.65) return true;
+    
+    // Мелкие пещеры везде
+    let smallCaveNoise = smoothNoise(x * 0.3, y * 0.3, s2);
+    if (smallCaveNoise > 0.72) return true;
+    
+    return false;
 }
 
 // 4. Генерирует один блок в позиции (x, y)
@@ -240,56 +257,81 @@ function generateBlockAt(x, y) {
     
     // 2. АД (глубина > 130 блоков)
     if (y > 130) {
+        // Пещеры в аду
+        if (Math.random() < 0.4) return null;
+        
         let hellDepth = y - 130;
-        let redIntensity = Math.min(255, 100 + hellDepth * 3);
+        let redIntensity = Math.min(255, 80 + hellDepth * 4);
         return {
             type: 'hellstone',
             color: `rgb(${redIntensity}, 0, 0)`
         };
     }
-    
     // 3. Определяем высоты для этой колонки
-    let surfaceHeight = generateSurfaceHeight(x);
-    let minSurfaceHeight = findMinSurfaceHeight(x);
-    let gradientStartY = minSurfaceHeight - 20; // Начинаем градиент на 20 блоков ниже самой низкой точки
+  let surfaceHeight = generateSurfaceHeight(x);
     
-    // 4. Если мы в градиентном слое
-    if (y >= gradientStartY && y < surfaceHeight) {
-        // Высота в градиенте (0-20)
-        let gradientHeight = y - gradientStartY;
-        return {
-            type: 'stone',
-            color: getDepthColorForGradient(gradientHeight)
-        };
+    // 4. Если ВЫШЕ поверхности - ВОЗДУХ
+    if (y > surfaceHeight) {
+        // Редкие парящие острова (только в небе)
+        if (y < surfaceHeight - 20) {
+            let islandNoise = smoothNoise(x * 0.05, y * 0.05, 123);
+            if (islandNoise > 0.95) {
+                return { type: 'stone' };
+            }
+        }
+        return null; // Воздух
     }
     
-    // 5. ПОВЕРХНОСТНЫЕ БЛОКИ
+    // 5. Если РОВНО на поверхности - трава
     if (y === surfaceHeight) {
         return { type: 'grass' };
-    } else if (y < surfaceHeight && y > surfaceHeight - 5) {
+    }
+    
+    // 6. Если сразу под поверхностью - земля
+    if (y < surfaceHeight && y > surfaceHeight - 5) {
         return { type: 'dirt' };
-    } else if (y < surfaceHeight) {
+    }
+    
+    // 7. Проверяем пещеры (только под землей)
+    if (y < surfaceHeight - 5) {
+        if (isCave(x, y, surfaceHeight)) {
+            return null; // Воздух в пещере
+        }
+    }
+    
+    // 8. ГРАДИЕНТНЫЙ СЛОЙ (только если мы глубоко)
+    if (y < surfaceHeight) {
+        let minSurfaceHeight = findMinSurfaceHeight(x);
+        let gradientStartY = minSurfaceHeight - 20;
+        
+        // Если мы в градиентном слое
+        if (y >= gradientStartY && y < surfaceHeight) {
+            let gradientHeight = y - gradientStartY;
+            // Только для камня в градиентном слое
+            if (y < surfaceHeight - 5) { // Ниже слоя земли
+                return {
+                    type: 'stone',
+                    color: getDepthColorForGradient(gradientHeight)
+                };
+            }
+        }
+        
+        // 9. Обычный камень
         return { type: 'stone' };
     }
     
-    // 6. ВОЗДУХ (ничего не возвращаем)
+    // 10. По умолчанию - воздух
     return null;
 }
 
 // 5. Основная функция генерации (ЗАМЕНИТЕ СТАРУЮ ФУНКЦИЮ)
 function generateRegion(startX, endX) {
-    const storageKey = 'void_echo_minecraft_' + currentSeed;
+    const storageKey = 'void_echo_realistic_' + currentSeed;
     const mods = JSON.parse(localStorage.getItem(storageKey) || '{}');
     
     for (let x = startX; x < endX; x++) {
-        // Сначала получаем высоту поверхности для этой колонки
-        let surfaceHeight = generateSurfaceHeight(x);
-        
-        // Генерируем от верха до низа (или на 20 блоков выше поверхности для платформ)
-        let startY = Math.max(0, surfaceHeight - 30);
-        let endY = 180; // До дна мира
-        
-        for (let y = startY; y < endY; y++) {
+        // Генерируем от неба (высота 0) до дна мира
+        for (let y = 0; y < 180; y++) {
             let key = `${x},${y}`;
             
             // Пропускаем уже существующие блоки
@@ -558,6 +600,7 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
 
 
 
