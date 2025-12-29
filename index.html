@@ -137,12 +137,26 @@ function drawChar(x, y, dir, wt, tint, isFake = false) {
     ctx.fillStyle = pCol; ctx.fillRect(2, -8, 6, 2); ctx.fillRect(-6, -8, 6, 2); ctx.restore();
 }
 
+// Возвращает цвет для блока на определенной высоте Y
+// Градиент: красный (низ) -> белый (верх)
 function getDepthColor(y) {
-    let ty = y / TILE; if (ty > 180 || ty < 20) return "white";
-    if (ty <= 100) return `rgb(255, ${Math.floor(255*(1-(ty-20)/80))}, ${Math.floor(255*(1-(ty-20)/80))})`;
-    return ty <= 120 ? "red" : `rgb(${Math.floor(255*(1-(ty-120)/30))}, 0, 0)`;
+    // Блоки выше высоты 20 - белые
+    if (y < 20) return "white";
+    
+    // Нормализуем высоту от 0 до 1
+    // 0 = самая высокая точка градиента (20 блоков вниз от самой низкой поверхности)
+    // 1 = самая низкая точка градиента (самая низкая поверхность)
+    let normalizedY = Math.max(0, Math.min(20, y)) / 20;
+    
+    // Градиент от красного к белому
+    // Красный: rgb(255, 0, 0)
+    // Белый: rgb(255, 255, 255)
+    let red = 255;
+    let green = Math.floor(255 * (1 - normalizedY));
+    let blue = Math.floor(255 * (1 - normalizedY));
+    
+    return `rgb(${red}, ${green}, ${blue})`;
 }
-
 function checkColl(obj, isX) {
     if (obj === player && isNoclip) return;
     let x1 = Math.floor(obj.x/TILE), x2 = Math.floor((obj.x+obj.w)/TILE), y1 = Math.floor(obj.y/TILE), y2 = Math.floor((obj.y+obj.h)/TILE);
@@ -161,63 +175,197 @@ function checkColl(obj, isX) {
 }
 
 // --- ГЕНЕРАТОР БЕСКОНЕЧНОГО МИРА ---
+// ================ НОВЫЕ ФУНКЦИИ ГЕНЕРАЦИИ ================
+
+// 1. Генерирует высоту поверхности для координаты X
+// ================ НОВЫЕ ФУНКЦИИ ГЕНЕРАЦИИ ================
+
+// 1. Генерирует высоту поверхности для координаты X
+function generateSurfaceHeight(x) {
+    const [s1] = cyrb128(currentSeed);
+    const noiseScale = 0.05;
+    const amplitude = 40;
+    const baseHeight = 80;
+    
+    // Основной шум для крупного рельефа
+    let mainNoise = smoothNoise(x * noiseScale, 0, s1) * amplitude;
+    
+    // Детализация
+    let detailNoise = smoothNoise(x * 0.15, 100, s1) * 12;
+    
+    // Мелкие детали
+    let smallDetail = smoothNoise(x * 0.3, 200, s1) * 6;
+    
+    // Комбинируем все слои
+    let height = baseHeight + mainNoise + detailNoise + smallDetail;
+    
+    // Ограничиваем высоту
+    return Math.floor(Math.max(40, Math.min(120, height)));
+}
+
+// 2. Находит минимальную высоту поверхности в радиусе
+function findMinSurfaceHeight(x) {
+    let minHeight = generateSurfaceHeight(x);
+    
+    for (let dx = -5; dx <= 5; dx++) {
+        let nearbyHeight = generateSurfaceHeight(x + dx);
+        if (nearbyHeight < minHeight) {
+            minHeight = nearbyHeight;
+        }
+    }
+    
+    return minHeight;
+}
+
+// 3. Возвращает цвет для градиента
+function getDepthColorForGradient(y) {
+    // y - высота в градиентном слое (0-20)
+    if (y < 0) return "white";
+    if (y > 20) return "rgb(255, 0, 0)";
+    
+    let normalizedY = y / 20;
+    let red = 255;
+    let green = Math.floor(255 * (1 - normalizedY));
+    let blue = Math.floor(255 * (1 - normalizedY));
+    
+    return `rgb(${red}, ${green}, ${blue})`;
+}
+
+// 4. Генерирует один блок в позиции (x, y)
+function generateBlockAt(x, y) {
+    // 1. БЕДРОК (дно мира)
+    if (y >= 175) {
+        return { type: 'bedrock' };
+    }
+    
+    // 2. АД (глубина > 130 блоков)
+    if (y > 130) {
+        let hellDepth = y - 130;
+        let redIntensity = Math.min(255, 100 + hellDepth * 3);
+        return {
+            type: 'hellstone',
+            color: `rgb(${redIntensity}, 0, 0)`
+        };
+    }
+    
+    // 3. Определяем высоты для этой колонки
+    let surfaceHeight = generateSurfaceHeight(x);
+    let minSurfaceHeight = findMinSurfaceHeight(x);
+    let gradientStartY = minSurfaceHeight - 20; // Начинаем градиент на 20 блоков ниже самой низкой точки
+    
+    // 4. Если мы в градиентном слое
+    if (y >= gradientStartY && y < surfaceHeight) {
+        // Высота в градиенте (0-20)
+        let gradientHeight = y - gradientStartY;
+        return {
+            type: 'stone',
+            color: getDepthColorForGradient(gradientHeight)
+        };
+    }
+    
+    // 5. ПОВЕРХНОСТНЫЕ БЛОКИ
+    if (y === surfaceHeight) {
+        return { type: 'grass' };
+    } else if (y < surfaceHeight && y > surfaceHeight - 5) {
+        return { type: 'dirt' };
+    } else if (y < surfaceHeight) {
+        return { type: 'stone' };
+    }
+    
+    // 6. ВОЗДУХ (ничего не возвращаем)
+    return null;
+}
+
+// 5. Основная функция генерации (ЗАМЕНИТЕ СТАРУЮ ФУНКЦИЮ)
 function generateRegion(startX, endX) {
-    const storageKey = 'void_echo_v1_' + currentSeed;
+    const storageKey = 'void_echo_minecraft_' + currentSeed;
     const mods = JSON.parse(localStorage.getItem(storageKey) || '{}');
-    const [s1, s2] = cyrb128(currentSeed);
-
+    
     for (let x = startX; x < endX; x++) {
-        // Линия поверхности
-        let surf = Math.floor(65 + smoothNoise(x * 0.05, 0, s1) * 30);
-
-        for (let y = 10; y < 180; y++) {
+        // Сначала получаем высоту поверхности для этой колонки
+        let surfaceHeight = generateSurfaceHeight(x);
+        
+        // Генерируем от верха до низа (или на 20 блоков выше поверхности для платформ)
+        let startY = Math.max(0, surfaceHeight - 30);
+        let endY = 180; // До дна мира
+        
+        for (let y = startY; y < endY; y++) {
             let key = `${x},${y}`;
+            
+            // Пропускаем уже существующие блоки
             if (world[key]) continue;
+            
+            // Проверяем модификации игрока
             if (mods[key]) {
                 if (mods[key] === "deleted") continue;
                 world[key] = { type: mods[key], modified: true };
                 continue;
             }
-
-            // --- БЕДРОК (Дно мира) ---
-            if (y >= 175) { world[key] = { type: 'bedrock' }; continue; }
-
-            // --- ЗОНА АДА (Глубина > 130) ---
-            if (y > 130) {
-                let hellCave = smoothNoise(x * 0.1, y * 0.1, s2);
-                let lavaLevel = 160 + Math.sin(x * 0.1) * 5;
-
-                if (hellCave < 0.45) { // Создаем массивные пещеры ада
-                    if (y > lavaLevel) {
-                        world[key] = { type: 'lava', dist: 0 };
-                    }
-                    continue; 
-                }
-                world[key] = { type: 'hellstone' };
-                continue;
-            }
-
-            // --- ВЕРХНИЙ МИР ---
-            let cave = smoothNoise(x * 0.15, y * 0.15, s1);
             
-            if (y >= surf) {
-                // Обычные пещеры (только в камне)
-                if (y > surf + 5 && cave > 0.7) continue;
-
-                if (y === surf) world[key] = { type: 'grass' };
-                else if (y < surf + 5) world[key] = { type: 'dirt' };
-                else world[key] = { type: 'stone' };
-            } else {
-                // Парящие острова
-                let islands = smoothNoise(x * 0.1, y * 0.1, s2);
-                if (islands > 0.82 && y < surf - 15) {
-                    world[key] = { type: 'stone' };
-                }
+            // Генерируем новый блок
+            let block = generateBlockAt(x, y);
+            if (block) {
+                world[key] = block;
             }
         }
     }
 }
 
+// ================ ОБНОВЛЕННАЯ ФУНКЦИЯ ОТРИСОВКИ ================
+
+// В функции gameLoop, в части отрисовки блоков, замените на:
+function drawBlockWithStyle(wx, wy, b, yOff = 0, alpha = 1) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    
+    if (b.type === 'lava') { 
+        ctx.fillStyle = "#FF4500"; 
+        ctx.fillRect(wx, wy + yOff + 4, TILE, TILE - 4); 
+    } else if (b.type === 'water') { 
+        ctx.fillStyle = "#00BFFF"; 
+        ctx.fillRect(wx, wy + yOff + 4, TILE, TILE - 4); 
+    } else if (b.type === 'rainbow') { 
+        ctx.fillStyle = `hsl(${rainbowHue}, 80%, 50%)`; 
+        ctx.fillRect(wx, wy + yOff, TILE, TILE); 
+    } else if (b.color) {
+        // Для градиентных и адских блоков
+        ctx.fillStyle = b.color;
+        ctx.fillRect(wx, wy + yOff, TILE, TILE);
+        ctx.strokeStyle = "#333";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(wx, wy + yOff, TILE, TILE);
+    } else {
+        // Для обычных блоков
+        let strokeColor = "#666";
+        if (b.type === 'bedrock') strokeColor = "#444";
+        if (b.type === 'grass') strokeColor = "#0a0";
+        if (b.type === 'dirt') strokeColor = "#963";
+        
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = b.type === 'bedrock' ? 4 : 2;
+        ctx.strokeRect(wx + 2, wy + yOff + 2, TILE - 4, TILE - 4);
+    }
+    
+    ctx.restore();
+}
+
+// Затем в цикле отрисовки в gameLoop вызовите:
+// Замените блок кода отрисовки на:
+/*
+for (let x = Math.floor(player.x / TILE - vw); x < Math.ceil(player.x / TILE + vw); x++) {
+    for (let y = Math.floor(player.y / TILE - vh); y < Math.ceil(player.y / TILE + vh); y++) {
+        const b = world[`${x},${y}`]; 
+        if (!b) continue;
+
+        const wx = x * TILE;
+        const wy = y * TILE;
+
+        // ... расчет yOff и alpha ...
+
+        drawBlockWithStyle(wx, wy, b, yOff, alpha);
+    }
+}
+*/
 function gameLoop() {
     if (!isGameStarted) return;
 
@@ -410,6 +558,7 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
 
 
 
