@@ -181,153 +181,254 @@ function checkColl(obj, isX) {
 // ================ НОВЫЕ ФУНКЦИИ ГЕНЕРАЦИИ ================
 
 // 1. Генерирует высоту поверхности для координаты X
+// ================ УЛУЧШЕННАЯ ГЕНЕРАЦИЯ С ГОРАМИ ================
+
+// 1. Генерирует высоту поверхности с горами
 function generateSurfaceHeight(x) {
-    const [s1] = cyrb128(currentSeed);
-    const noiseScale = 0.03; // Более плавные холмы
-    const amplitude = 50;    // Больший разброс высот
+    const [s1, s2, s3] = cyrb128(currentSeed);
+    
+    // Масштабы шумов
+    const baseScale = 0.02;     // Очень крупные формы
+    const mountainScale = 0.008; // Огромные горные хребты
+    const hillScale = 0.06;     // Средние холмы
+    const detailScale = 0.15;   // Мелкие детали
+    
+    // Амплитуды
+    const baseAmplitude = 35;    // Базовый рельеф
+    const mountainAmplitude = 80; // Высокие горы
+    const hillAmplitude = 25;    // Холмы
+    const detailAmplitude = 8;   // Детализация
+    
     const baseHeight = 80;
     
-    // Основной шум для крупного рельефа
-    let mainNoise = smoothNoise(x * noiseScale, 0, s1) * amplitude;
+    // 1. Очень крупные формы (континенты)
+    let baseNoise = smoothNoise(x * baseScale, 0, s1) * baseAmplitude;
     
-    // Детализация (средние холмы)
-    let detailNoise = smoothNoise(x * 0.08, 100, s1) * 20;
+    // 2. Горные хребты (редкие, но высокие)
+    let mountainMask = smoothNoise(x * 0.005, 500, s2); // Определяем где будут горы
+    let mountainNoise = smoothNoise(x * mountainScale, 1000, s1);
+    let mountains = 0;
+    if (mountainMask > 0.5) { // Горы только в некоторых местах
+        mountains = mountainNoise * mountainAmplitude * (mountainMask - 0.5) * 2;
+    }
     
-    // Мелкие детали
-    let smallDetail = smoothNoise(x * 0.2, 200, s1) * 8;
+    // 3. Средние холмы
+    let hillNoise = smoothNoise(x * hillScale, 2000, s2) * hillAmplitude;
+    
+    // 4. Мелкие детали
+    let detailNoise = smoothNoise(x * detailScale, 3000, s3) * detailAmplitude;
     
     // Комбинируем все слои
-    let height = baseHeight + mainNoise + detailNoise + smallDetail;
+    let height = baseHeight + baseNoise + mountains + hillNoise + detailNoise;
     
-    // Ограничиваем высоту
-    return Math.floor(Math.max(50, Math.min(110, height)));
+    // Ограничиваем высоту (горы могут быть до 180, равнины от 60)
+    return Math.floor(Math.max(60, Math.min(180, height)));
 }
 
-// 2. Находит минимальную высоту поверхности в радиусе
-function findMinSurfaceHeight(x) {
-    let minHeight = generateSurfaceHeight(x);
+// 2. Находит абсолютную минимальную высоту поверхности
+function findAbsoluteMinSurfaceHeight() {
+    let minHeight = 180; // Максимально возможная высота
+    const [s1] = cyrb128(currentSeed);
     
-    for (let dx = -3; dx <= 3; dx++) {
-        let nearbyHeight = generateSurfaceHeight(x + dx);
-        if (nearbyHeight < minHeight) {
-            minHeight = nearbyHeight;
+    // Проверяем 1000 блоков в каждую сторону для надежности
+    for (let x = -500; x <= 500; x++) {
+        let height = generateSurfaceHeight(x);
+        if (height < minHeight) {
+            minHeight = height;
         }
     }
     
     return minHeight;
 }
 
-// 3. Возвращает цвет для градиента
-function getDepthColorForGradient(y) {
-    // y - высота в градиентном слое (0-20)
-    if (y <= 0) return "white";
-    if (y >= 20) return "rgb(255, 0, 0)";
+// 3. Плавный градиентный цвет
+function getSmoothGradientColor(gradientHeight) {
+    // gradientHeight: 0-20 (0 = верх градиента, 20 = низ градиента)
     
-    let normalizedY = y / 20;
-    let red = 255;
-    let green = Math.floor(255 * (1 - normalizedY));
-    let blue = Math.floor(255 * (1 - normalizedY));
+    if (gradientHeight <= 0) return "white";
+    if (gradientHeight >= 20) return "rgb(255, 0, 0)";
     
-    return `rgb(${red}, ${green}, ${blue})`;
+    // Используем кубическую интерполяцию для плавности
+    let t = gradientHeight / 20;
+    
+    // Плавная функция easing
+    let smoothT = t * t * (3 - 2 * t); // Кубическая интерполяция
+    
+    // Цвета для градиента
+    let startColor = { r: 255, g: 255, b: 255 }; // Белый
+    let endColor = { r: 255, g: 0, b: 0 };      // Красный
+    
+    // Плавный переход
+    let r = Math.floor(startColor.r + (endColor.r - startColor.r) * smoothT);
+    let g = Math.floor(startColor.g + (endColor.g - startColor.g) * smoothT);
+    let b = Math.floor(startColor.b + (endColor.b - startColor.b) * smoothT);
+    
+    return `rgb(${r}, ${g}, ${b})`;
 }
 
+// 4. Проверяет, есть ли пещера в этой позиции
 function isCave(x, y, surfaceHeight) {
     const [s1, s2] = cyrb128(currentSeed);
     
     // Только под землей
     if (y >= surfaceHeight - 5) return false;
     
-    // Большие пещеры глубоко
-    let bigCaveNoise = smoothNoise(x * 0.1, y * 0.1, s1);
-    if (y > 60 && bigCaveNoise > 0.65) return true;
+    // Глубина от поверхности
+    let depth = surfaceHeight - y;
     
-    // Мелкие пещеры везде
-    let smallCaveNoise = smoothNoise(x * 0.3, y * 0.3, s2);
-    if (smallCaveNoise > 0.72) return true;
+    // Вероятность пещер увеличивается с глубиной
+    let caveChance = 0.3 + (depth / 100) * 0.4;
+    
+    // Большие пещеры глубоко
+    let bigCaveNoise = smoothNoise(x * 0.12, y * 0.12, s1);
+    if (depth > 40 && bigCaveNoise > (1 - caveChance)) return true;
+    
+    // Мелкие пещеры
+    let smallCaveNoise = smoothNoise(x * 0.25, y * 0.25, s2);
+    if (smallCaveNoise > 0.78) return true;
+    
+    // Вертикальные пещеры (шахты)
+    let verticalCave = smoothNoise(x * 0.4, 0, s1);
+    if (verticalCave > 0.9 && Math.abs(x % 20) < 2) return true;
     
     return false;
 }
 
-// 4. Генерирует один блок в позиции (x, y)
+// 5. Проверяет, находится ли позиция на склоне горы
+function isMountainSlope(x, y, surfaceHeight) {
+    const [s1] = cyrb128(currentSeed);
+    
+    // Только на поверхности или около нее
+    if (y < surfaceHeight - 10 || y > surfaceHeight) return false;
+    
+    // Проверяем крутизну склона
+    let heightHere = generateSurfaceHeight(x);
+    let heightLeft = generateSurfaceHeight(x - 1);
+    let heightRight = generateSurfaceHeight(x + 1);
+    
+    // Крутой склон если разница больше 3 блоков
+    let steepLeft = Math.abs(heightHere - heightLeft) > 3;
+    let steepRight = Math.abs(heightHere - heightRight) > 3;
+    
+    return steepLeft || steepRight;
+}
+
+// 6. Генерирует один блок в позиции (x, y)
 function generateBlockAt(x, y) {
     // 1. БЕДРОК (дно мира)
     if (y >= 175) {
         return { type: 'bedrock' };
     }
     
-    // 2. АД (глубина > 130 блоков)
+    // 2. Определяем высоту поверхности для этой колонки
+    let surfaceHeight = generateSurfaceHeight(x);
+    
+    // 3. АД (глубина > 130 блоков)
     if (y > 130) {
-        // Пещеры в аду
-        if (Math.random() < 0.4) return null;
+        // Больше пещер в аду
+        if (Math.random() < 0.5) return null;
         
         let hellDepth = y - 130;
-        let redIntensity = Math.min(255, 80 + hellDepth * 4);
+        let redIntensity = Math.min(255, 50 + hellDepth * 5);
+        
+        // Добавляем немного вариативности
+        let variation = Math.sin(x * 0.1 + y * 0.05) * 20;
+        redIntensity = Math.max(50, Math.min(255, redIntensity + variation));
+        
         return {
             type: 'hellstone',
             color: `rgb(${redIntensity}, 0, 0)`
         };
     }
-    // 3. Определяем высоты для этой колонки
-  let surfaceHeight = generateSurfaceHeight(x);
     
-    // 4. Если ВЫШЕ поверхности - ВОЗДУХ
+    // 4. Если ВЫШЕ поверхности - ВОЗДУХ (когда игрок высоко в горах)
     if (y > surfaceHeight) {
-        // Редкие парящие острова (только в небе)
-        if (y < surfaceHeight - 20) {
-            let islandNoise = smoothNoise(x * 0.05, y * 0.05, 123);
-            if (islandNoise > 0.95) {
-                return { type: 'stone' };
-            }
+        // Снег на вершинах высоких гор
+        if (surfaceHeight > 140 && y === surfaceHeight + 1) {
+            if (Math.random() < 0.7) return { type: 'snow' };
         }
         return null; // Воздух
     }
     
-    // 5. Если РОВНО на поверхности - трава
+    // 5. Если РОВНО на поверхности
     if (y === surfaceHeight) {
-        return { type: 'grass' };
+        // Снег на высоких горах
+        if (surfaceHeight > 140) {
+            return { type: 'snow' };
+        }
+        // Камень на крутых склонах
+        else if (isMountainSlope(x, y, surfaceHeight)) {
+            return { type: 'stone' };
+        }
+        // Обычная трава
+        else {
+            return { type: 'grass' };
+        }
     }
     
-    // 6. Если сразу под поверхностью - земля
+    // 6. Если сразу под поверхностью
     if (y < surfaceHeight && y > surfaceHeight - 5) {
+        // На горах сразу камень под снегом
+        if (surfaceHeight > 140 && y === surfaceHeight - 1) {
+            return { type: 'stone' };
+        }
         return { type: 'dirt' };
     }
     
-    // 7. Проверяем пещеры (только под землей)
+    // 7. Находим абсолютную минимальную высоту для градиента
+    // (вычисляем один раз и кэшируем)
+    if (!window.absoluteMinSurfaceHeight) {
+        window.absoluteMinSurfaceHeight = findAbsoluteMinSurfaceHeight();
+    }
+    let absoluteMin = window.absoluteMinSurfaceHeight;
+    let gradientStartY = absoluteMin - 20; // Начинаем градиент за 20 блоков ДО самой низкой точки
+    
+    // 8. ГРАДИЕНТНЫЙ СЛОЙ (20 блоков вниз от самой низкой точки поверхности)
+    if (y >= gradientStartY && y < surfaceHeight) {
+        // Вычисляем высоту в градиенте (0-20)
+        // 0 = верх градиента (самая низкая поверхность - 20)
+        // 20 = низ градиента (самая низкая поверхность)
+        let gradientHeight = y - gradientStartY;
+        
+        // Только для камня в градиентном слое (ниже слоя земли)
+        if (y < surfaceHeight - 5) {
+            // Проверяем пещеры в градиентном слое
+            if (isCave(x, y, surfaceHeight)) {
+                return null;
+            }
+            
+            return {
+                type: 'stone',
+                color: getSmoothGradientColor(gradientHeight)
+            };
+        }
+    }
+    
+    // 9. Проверяем пещеры (для обычного камня)
     if (y < surfaceHeight - 5) {
         if (isCave(x, y, surfaceHeight)) {
             return null; // Воздух в пещере
         }
     }
     
-    // 8. ГРАДИЕНТНЫЙ СЛОЙ (только если мы глубоко)
-    if (y < surfaceHeight) {
-        let minSurfaceHeight = findMinSurfaceHeight(x);
-        let gradientStartY = minSurfaceHeight - 20;
-        
-        // Если мы в градиентном слое
-        if (y >= gradientStartY && y < surfaceHeight) {
-            let gradientHeight = y - gradientStartY;
-            // Только для камня в градиентном слое
-            if (y < surfaceHeight - 5) { // Ниже слоя земли
-                return {
-                    type: 'stone',
-                    color: getDepthColorForGradient(gradientHeight)
-                };
-            }
-        }
-        
-        // 9. Обычный камень
+    // 10. Обычный камень (все что глубже 5 блоков от поверхности)
+    if (y < surfaceHeight - 5) {
         return { type: 'stone' };
     }
     
-    // 10. По умолчанию - воздух
+    // 11. По умолчанию - воздух
     return null;
 }
 
-// 5. Основная функция генерации (ЗАМЕНИТЕ СТАРУЮ ФУНКЦИЮ)
+// 7. Основная функция генерации
 function generateRegion(startX, endX) {
-    const storageKey = 'void_echo_realistic_' + currentSeed;
+    const storageKey = 'void_echo_mountains_' + currentSeed;
     const mods = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    
+    // Кэшируем абсолютную минимальную высоту
+    if (!window.absoluteMinSurfaceHeight) {
+        window.absoluteMinSurfaceHeight = findAbsoluteMinSurfaceHeight();
+    }
     
     for (let x = startX; x < endX; x++) {
         // Генерируем от неба (высота 0) до дна мира
@@ -352,7 +453,6 @@ function generateRegion(startX, endX) {
         }
     }
 }
-
 // ================ ОБНОВЛЕННАЯ ФУНКЦИЯ ОТРИСОВКИ ================
 
 // В функции gameLoop, в части отрисовки блоков, замените на:
@@ -600,6 +700,7 @@ function initMenu() {
 </script>
 </body>
 </html>```
+
 
 
 
